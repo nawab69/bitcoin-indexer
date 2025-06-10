@@ -247,6 +247,11 @@ class SimpleIndexer {
         
         if (prevOutput?.value) {
           totalInput += prevOutput.value;
+          
+          // Update address info for spending (if we have the address)
+          if (prevOutput.address) {
+            await this.updateAddressInfo(prevOutput.address, prevOutput.value, false, tx.blockheight);
+          }
         }
       }
     }
@@ -332,11 +337,23 @@ class SimpleIndexer {
     await this.db.run(`INSERT OR IGNORE INTO addresses (address, first_seen_block) VALUES (?, ?)`, [address, blockHeight]);
 
     if (isReceived) {
+      // Address is receiving money (from transaction outputs)
       await this.db.run(`
         UPDATE addresses SET 
           received_count = received_count + 1,
           balance = balance + ?,
           total_received = total_received + ?,
+          last_seen_block = COALESCE(?, last_seen_block),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE address = ?
+      `, [value, value, blockHeight, address]);
+    } else {
+      // Address is spending money (from transaction inputs)
+      await this.db.run(`
+        UPDATE addresses SET 
+          sent_count = sent_count + 1,
+          balance = balance - ?,
+          total_sent = total_sent + ?,
           last_seen_block = COALESCE(?, last_seen_block),
           updated_at = CURRENT_TIMESTAMP
         WHERE address = ?

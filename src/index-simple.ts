@@ -336,29 +336,47 @@ class SimpleIndexer {
   private async updateAddressInfo(address: string, value: number, isReceived: boolean, blockHeight?: number): Promise<void> {
     await this.db.run(`INSERT OR IGNORE INTO addresses (address, first_seen_block) VALUES (?, ?)`, [address, blockHeight]);
 
-    if (isReceived) {
-      // Address is receiving money (from transaction outputs)
-      await this.db.run(`
-        UPDATE addresses SET 
-          received_count = received_count + 1,
-          balance = balance + ?,
-          total_received = total_received + ?,
-          last_seen_block = COALESCE(?, last_seen_block),
-          updated_at = CURRENT_TIMESTAMP
-        WHERE address = ?
-      `, [value, value, blockHeight, address]);
-    } else {
-      // Address is spending money (from transaction inputs)
-      await this.db.run(`
-        UPDATE addresses SET 
-          sent_count = sent_count + 1,
-          balance = balance - ?,
-          total_sent = total_sent + ?,
-          last_seen_block = COALESCE(?, last_seen_block),
-          updated_at = CURRENT_TIMESTAMP
-        WHERE address = ?
-      `, [value, value, blockHeight, address]);
-    }
+    // Instead of incrementing, recalculate the address statistics from actual transaction data
+    await this.recalculateAddressStats(address, blockHeight);
+  }
+
+  private async recalculateAddressStats(address: string, blockHeight?: number): Promise<void> {
+    // Calculate total received from transaction outputs
+    const receivedData = await this.db.get(`
+      SELECT 
+        COUNT(*) as received_count,
+        COALESCE(SUM(value), 0) as total_received
+      FROM transaction_outputs 
+      WHERE address = ? AND is_spent IS NOT NULL
+    `, [address]);
+
+    // Calculate total sent from transaction inputs (previous outputs that were spent)
+    const sentData = await this.db.get(`
+      SELECT 
+        COUNT(*) as sent_count,
+        COALESCE(SUM(prev_value), 0) as total_sent
+      FROM transaction_inputs 
+      WHERE prev_address = ? AND prev_value IS NOT NULL
+    `, [address]);
+
+    const totalReceived = receivedData?.total_received || 0;
+    const totalSent = sentData?.total_sent || 0;
+    const balance = totalReceived - totalSent;
+    const receivedCount = receivedData?.received_count || 0;
+    const sentCount = sentData?.sent_count || 0;
+
+    // Update with calculated values (idempotent)
+    await this.db.run(`
+      UPDATE addresses SET 
+        received_count = ?,
+        sent_count = ?,
+        balance = ?,
+        total_received = ?,
+        total_sent = ?,
+        last_seen_block = COALESCE(?, last_seen_block),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE address = ?
+    `, [receivedCount, sentCount, balance, totalReceived, totalSent, blockHeight, address]);
   }
 
   // API methods

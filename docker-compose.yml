@@ -1,0 +1,87 @@
+version: "3.8"
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: bitcoin-indexer-postgres
+    environment:
+      POSTGRES_DB: bitcoin_indexer
+      POSTGRES_USER: bitcoin_user
+      POSTGRES_PASSWORD: bitcoin_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bitcoin_user -d bitcoin_indexer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - bitcoin-indexer-network
+
+  # Redis for caching (optional, ready for future use)
+  redis:
+    image: redis:7-alpine
+    container_name: bitcoin-indexer-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - bitcoin-indexer-network
+
+  # Bitcoin Indexer Application (ready for containerization)
+  # Commented out since we'll run the indexer locally and connect to external Bitcoin node
+  # bitcoin-indexer:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: bitcoin-indexer-app
+  #   ports:
+  #     - "3001:3001"
+  #   environment:
+  #     - NODE_ENV=production
+  #     - DB_HOST=postgres
+  #     - DB_PORT=5432
+  #     - DB_NAME=bitcoin_indexer
+  #     - DB_USER=bitcoin_user
+  #     - DB_PASSWORD=bitcoin_password
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - BITCOIN_RPC_HOST=localhost  # External Bitcoin node
+  #     - BITCOIN_RPC_PORT=18443
+  #     - BITCOIN_RPC_USER=nawab
+  #     - BITCOIN_RPC_PASSWORD=nawab123
+  #     - BITCOIN_NETWORK=regtest
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   networks:
+  #     - bitcoin-indexer-network
+  #   # Uncomment when Dockerfile is ready
+  #   # profiles:
+  #   #   - production
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  bitcoin-indexer-network:
+    driver: bridge 

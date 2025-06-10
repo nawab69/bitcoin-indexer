@@ -136,26 +136,54 @@ class SimpleIndexer {
       
       logger.debug(`Processing transaction ${i + 1}/${block.tx.length}: ${txidString}`);
       
-      // Store basic transaction info with required fields
-      await this.db.run(`
-        INSERT OR REPLACE INTO transactions (
-          txid, hash, block_hash, block_height, block_time, confirmations,
-          version, size, vsize, weight, locktime, fee
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        txidString,
-        txidString, // Use txid as hash for now
-        block.hash,
-        block.height,
-        block.time,
-        block.confirmations,
-        1, // default version
-        0, // default size
-        0, // default vsize  
-        0, // default weight
-        0, // default locktime
-        null // fee unknown
-      ]);
+      try {
+        // Skip genesis block coinbase transaction (it can't be retrieved via RPC)
+        if (block.height === 0 && i === 0) {
+          logger.debug('Skipping genesis block coinbase transaction');
+          await this.db.run(`
+            INSERT OR REPLACE INTO transactions (
+              txid, hash, block_hash, block_height, block_time, confirmations,
+              version, size, vsize, weight, locktime, fee
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            txidString,
+            txidString,
+            block.hash,
+            block.height,
+            block.time,
+            block.confirmations,
+            1, 0, 0, 0, 0, null
+          ]);
+          continue;
+        }
+
+        // Get full transaction details
+        const transaction = await this.rpc.getTransaction(txidString);
+        transaction.blockhash = block.hash;
+        transaction.blockheight = block.height;
+        transaction.blocktime = block.time;
+        transaction.confirmations = block.confirmations;
+        
+        await this.indexTransaction(transaction);
+      } catch (error) {
+        logger.warn(`Failed to get transaction details for ${txidString} in block ${block.height}, storing basic info only:`, error);
+        
+        // Fallback: store basic transaction info
+        await this.db.run(`
+          INSERT OR REPLACE INTO transactions (
+            txid, hash, block_hash, block_height, block_time, confirmations,
+            version, size, vsize, weight, locktime, fee
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          txidString,
+          txidString,
+          block.hash,
+          block.height,
+          block.time,
+          block.confirmations,
+          1, 0, 0, 0, 0, null
+        ]);
+      }
     }
 
     logger.debug(`Indexed block ${block.height} with ${block.tx.length} transactions`);

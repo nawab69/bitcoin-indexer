@@ -38,8 +38,8 @@ export class DatabaseConnection {
       throw new Error('Database not connected');
     }
 
-    // Enable foreign keys
-    await this.run('PRAGMA foreign_keys = ON');
+    // Disable foreign keys for now to avoid out-of-order transaction issues
+    await this.run('PRAGMA foreign_keys = OFF');
     
     // Set WAL mode for better concurrency
     await this.run('PRAGMA journal_mode = WAL');

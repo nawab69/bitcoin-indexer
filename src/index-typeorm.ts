@@ -74,7 +74,6 @@ class BitcoinIndexerTypeORM {
             const batchSize = 10; // Process 10 blocks at a time
             const maxBlocks = 50; // Process max 50 blocks per startup
             const endHeight = Math.min(currentHeight, startHeight + maxBlocks - 1);
-
             if (startHeight <= endHeight) {
                 // Process in batches to avoid overwhelming the system
                 for (let batchStart = startHeight; batchStart <= endHeight; batchStart += batchSize) {

@@ -11,6 +11,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "dev:typeorm": "ts-node-dev --respawn --transpile-only src/index-typeorm.ts",
     "test:typeorm": "ts-node-dev --respawn --transpile-only src/index-typeorm-minimal.ts",
+    "clean-sync": "ts-node-dev --transpile-only src/index-clean-sync.ts",
     "demo": "node demo.js",
     "test": "jest",
     "typeorm": "typeorm-ts-node-commonjs",

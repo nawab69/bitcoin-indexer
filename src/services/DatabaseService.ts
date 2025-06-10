@@ -322,6 +322,15 @@ export class DatabaseService {
         });
     }
 
+    async getUTXOByTxidAndIndex(txid: string, outputIndex: number): Promise<UTXO | null> {
+        return await this.utxoRepo.findOne({
+            where: { 
+                transaction_id: txid, 
+                output_index: outputIndex 
+            }
+        });
+    }
+
     // State management
     async getState(key: string): Promise<string | null> {
         const state = await this.stateRepo.findOne({ where: { key } });
@@ -457,35 +466,74 @@ export class DatabaseService {
         try {
             logger.info('🔄 Recalculating address balances...');
 
-            // Reset all address balances
-            await this.addressRepo.update({}, {
-                balance: '0',
-                total_received: '0',
-                total_sent: '0',
-                transaction_count: 0,
-                utxo_count: 0
-            });
-
-            // Recalculate from UTXOs
-            const utxos = await this.utxoRepo.find({ where: { is_spent: false } });
-            const addressBalances = new Map<string, { balance: bigint, count: number }>();
-
-            for (const utxo of utxos) {
-                const current = addressBalances.get(utxo.address) || { balance: BigInt(0), count: 0 };
-                addressBalances.set(utxo.address, {
-                    balance: current.balance + BigInt(utxo.value),
-                    count: current.count + 1
+            // Reset all address balances (find all addresses first)
+            const allAddresses = await this.addressRepo.find();
+            for (const addr of allAddresses) {
+                await this.addressRepo.update({ id: addr.id }, {
+                    balance: '0',
+                    total_received: '0',
+                    total_sent: '0',
+                    transaction_count: 0,
+                    utxo_count: 0
                 });
             }
 
+            // Recalculate from all UTXOs (both spent and unspent)
+            const allUtxos = await this.utxoRepo.find();
+            const spentUtxos = await this.utxoRepo.find({ where: { is_spent: true } });
+            const unspentUtxos = await this.utxoRepo.find({ where: { is_spent: false } });
+            
+            const addressStats = new Map<string, { 
+                balance: bigint, 
+                totalReceived: bigint, 
+                totalSent: bigint, 
+                utxoCount: number,
+                txCount: number 
+            }>();
+
+            // Calculate received amounts from all UTXOs (outputs)
+            for (const utxo of allUtxos) {
+                const current = addressStats.get(utxo.address) || { 
+                    balance: BigInt(0), 
+                    totalReceived: BigInt(0), 
+                    totalSent: BigInt(0), 
+                    utxoCount: 0,
+                    txCount: 0
+                };
+                
+                current.totalReceived += BigInt(utxo.value);
+                current.txCount += 1;
+                
+                addressStats.set(utxo.address, current);
+            }
+
+            // Calculate sent amounts from spent UTXOs
+            for (const utxo of spentUtxos) {
+                const current = addressStats.get(utxo.address);
+                if (current) {
+                    current.totalSent += BigInt(utxo.value);
+                }
+            }
+
+            // Calculate current balance from unspent UTXOs
+            for (const utxo of unspentUtxos) {
+                const current = addressStats.get(utxo.address);
+                if (current) {
+                    current.balance += BigInt(utxo.value);
+                    current.utxoCount += 1;
+                }
+            }
+
             // Update address balances
-            for (const [address, data] of addressBalances) {
+            for (const [address, stats] of addressStats) {
                 await this.addressRepo.update(
                     { address },
                     { 
-                        balance: data.balance.toString(),
-                        total_received: data.balance.toString(),
-                        utxo_count: data.count
+                        balance: stats.balance.toString(),
+                        total_received: stats.totalReceived.toString(),
+                        total_sent: stats.totalSent.toString(),
+                        utxo_count: stats.utxoCount,
+                        transaction_count: stats.txCount
                     }
                 );
             }

@@ -189,10 +189,15 @@ export class TypeORMIndexerAdapter {
             // Save transaction
             await this.dbService.saveTransaction(txData, blockHeight, blockTime);
             
-            // Process inputs
+            // Process inputs and track spending
             if (txData.vin) {
                 for (let i = 0; i < txData.vin.length; i++) {
                     await this.dbService.saveTransactionInput(txData.vin[i], txid);
+                    
+                    // Track spending of previous outputs (if not coinbase)
+                    if (txData.vin[i].txid && txData.vin[i].vout !== undefined) {
+                        await this.processInputSpending(txData.vin[i], txid, blockHeight);
+                    }
                 }
             }
             
@@ -221,6 +226,29 @@ export class TypeORMIndexerAdapter {
         } catch (error) {
             logger.error(`Error processing transaction ${txid}:`, error);
             throw error;
+        }
+    }
+
+    private async processInputSpending(input: any, spendingTxid: string, blockHeight: number): Promise<void> {
+        try {
+            const previousTxid = input.txid;
+            const previousVout = input.vout;
+
+            // Find the UTXO being spent
+            const utxo = await this.dbService.getUTXOByTxidAndIndex(previousTxid, previousVout);
+            if (utxo && !utxo.is_spent) {
+                // Mark UTXO as spent
+                await this.dbService.spendUTXO(previousTxid, previousVout, spendingTxid, input.n || 0, blockHeight);
+                
+                // Update address balance (subtract the spent amount)
+                const spentValue = BigInt(utxo.value);
+                await this.dbService.updateAddressBalance(utxo.address, spentValue, false, spendingTxid);
+                
+                logger.debug(`Marked UTXO ${previousTxid}:${previousVout} as spent by ${spendingTxid}`);
+            }
+        } catch (error) {
+            logger.error(`Error processing input spending for ${input.txid}:${input.vout}:`, error);
+            // Don't throw - continue processing other inputs
         }
     }
 
